@@ -1,0 +1,19 @@
+# Core Dependencies for FastAPI
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+gunicorn==23.0.0
+
+# AI/ML Stack (Production Inference)
+# Note: For Railway/CPU deployment, consider using:
+# --extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+torchvision>=0.15.0
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# Dependencies for training/augmentation scripts (code ratna)
+pandas>=2.0.0
+scikit-learn>=1.2.0
+matplotlib>=3.7.0
+pillow-heif>=0.12.0

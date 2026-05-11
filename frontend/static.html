@@ -1,0 +1,1303 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VisionID — Sistem Klasifikasi Gambar</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Fonts: Playfair Display + Plus Jakarta Sans + DM Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              display: ['"Playfair Display"', "serif"],
+              body: ['"Plus Jakarta Sans"', "sans-serif"],
+              mono: ['"DM Mono"', "monospace"],
+            },
+            colors: {
+              ink: {
+                900: "#07070e",
+                800: "#0d0d1a",
+                700: "#121220",
+                600: "#181826",
+                500: "#1e1e2e",
+              },
+              gold: {
+                DEFAULT: "#c9a84c",
+                light: "#e8c96a",
+                pale: "#f5e4b0",
+                dim: "rgba(201,168,76,0.15)",
+                border: "rgba(201,168,76,0.25)",
+              },
+            },
+            boxShadow: {
+              gold: "0 0 30px rgba(201,168,76,0.12)",
+              "gold-lg": "0 0 60px rgba(201,168,76,0.18)",
+              inner: "inset 0 1px 0 rgba(255,255,255,0.04)",
+            },
+            animation: {
+              "fade-up": "fadeUp 0.5s ease forwards",
+              "pulse-gold": "pulseGold 2s ease-in-out infinite",
+              shimmer: "shimmer 1.8s linear infinite",
+              "spin-slow": "spin 3s linear infinite",
+            },
+            keyframes: {
+              fadeUp: {
+                from: { opacity: "0", transform: "translateY(18px)" },
+                to: { opacity: "1", transform: "translateY(0)" },
+              },
+              pulseGold: {
+                "0%,100%": { boxShadow: "0 0 0 0 rgba(201,168,76,0.25)" },
+                "50%": { boxShadow: "0 0 0 10px rgba(201,168,76,0)" },
+              },
+              shimmer: {
+                from: { backgroundPosition: "-200% center" },
+                to: { backgroundPosition: "200% center" },
+              },
+            },
+          },
+        },
+      };
+    </script>
+
+    <style>
+      :root {
+        --bg-color: #07070e;
+        --text-color: #f0ebe0;
+        --panel-bg: #0d0d1a;
+        --border-color: rgba(201, 168, 76, 0.18);
+        --input-bg: #181826;
+        --stone-400: #a8a29e;
+        --stone-500: #78716c;
+        --stone-600: #57534e;
+      }
+
+      .light {
+        --bg-color: #fdfcf9;
+        --text-color: #1c1917;
+        --panel-bg: #ffffff;
+        --border-color: rgba(201, 168, 76, 0.3);
+        --input-bg: #f5f5f4;
+        --stone-400: #57534e;
+        --stone-500: #78716c;
+        --stone-600: #a8a29e;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        font-family: "Plus Jakarta Sans", sans-serif;
+        min-height: 100vh;
+        transition: background-color 0.3s, color 0.3s;
+      }
+
+      /* Grain overlay */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+        background-size: 128px;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      /* Radial glow top-center */
+      body::after {
+        content: "";
+        position: fixed;
+        top: -200px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 800px;
+        height: 500px;
+        background: radial-gradient(
+          ellipse,
+          rgba(201, 168, 76, 0.06) 0%,
+          transparent 70%
+        );
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .z-1 {
+        z-index: 1;
+        position: relative;
+      }
+
+      /* Gold divider line */
+      .gold-line {
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(201, 168, 76, 0.5),
+          transparent
+        );
+      }
+
+      /* Upload dropzone */
+      #dropzone {
+        border: 1.5px dashed rgba(201, 168, 76, 0.3);
+        transition:
+          border-color 0.25s,
+          background 0.25s,
+          box-shadow 0.25s;
+      }
+      #dropzone.drag-over {
+        border-color: rgba(201, 168, 76, 0.8);
+        background: rgba(201, 168, 76, 0.05);
+        box-shadow: 0 0 40px rgba(201, 168, 76, 0.1);
+      }
+
+      /* Shimmer loading bar */
+      .shimmer-bar {
+        background: linear-gradient(
+          90deg,
+          #1e1e2e 25%,
+          #2a2a3e 50%,
+          #1e1e2e 75%
+        );
+        background-size: 200% auto;
+        animation: shimmer 1.8s linear infinite;
+      }
+
+      /* Confidence bar fill */
+      .bar-fill {
+        transition: width 0.9s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      /* Result card */
+      .result-card {
+        animation: fadeUp 0.5s ease forwards;
+      }
+
+      /* Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: var(--panel-bg);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(201, 168, 76, 0.3);
+        border-radius: 3px;
+      }
+
+      /* Toggle switch */
+      .toggle-track {
+        transition: background 0.25s;
+      }
+      .toggle-thumb {
+        transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      /* Select dropdown custom */
+      select {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23c9a84c' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+
+      select option {
+        background: var(--input-bg);
+        color: var(--text-color);
+      }
+
+      .tag-correct {
+        background: rgba(74, 222, 128, 0.12);
+        border: 1px solid rgba(74, 222, 128, 0.4);
+        color: #4ade80;
+      }
+      .tag-wrong {
+        background: rgba(248, 113, 113, 0.12);
+        border: 1px solid rgba(248, 113, 113, 0.4);
+        color: #f87171;
+      }
+      .tag-neutral {
+        background: rgba(201, 168, 76, 0.1);
+        border: 1px solid rgba(201, 168, 76, 0.3);
+        color: #c9a84c;
+      }
+
+      .top5-bar {
+        background: rgba(201, 168, 76, 0.08);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .top5-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        background: linear-gradient(
+          90deg,
+          rgba(201, 168, 76, 0.5),
+          rgba(232, 201, 106, 0.7)
+        );
+        transition: width 1s ease 0.3s;
+      }
+
+      .fade-in {
+        animation: fadeUp 0.4s ease forwards;
+      }
+      .delay-1 {
+        animation-delay: 0.05s;
+        opacity: 0;
+      }
+      .delay-2 {
+        animation-delay: 0.1s;
+        opacity: 0;
+      }
+      .delay-3 {
+        animation-delay: 0.15s;
+        opacity: 0;
+      }
+      .delay-4 {
+        animation-delay: 0.2s;
+        opacity: 0;
+      }
+      .delay-5 {
+        animation-delay: 0.25s;
+        opacity: 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- =========================================================
+     HEADER
+========================================================= -->
+    <header
+      class="z-1 border-b border-gold-border/40 backdrop-blur-sm sticky top-0 transition-colors"
+      style="background: var(--bg-color); opacity: 0.95;"
+    >
+      <div
+        class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between"
+      >
+        <!-- Logo -->
+        <div class="flex items-center gap-3">
+          <div
+            class="w-8 h-8 rounded-lg flex items-center justify-center"
+            style="background: linear-gradient(135deg, #c9a84c, #8a6a1a)"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect
+                x="1"
+                y="1"
+                width="6"
+                height="6"
+                rx="1"
+                fill="white"
+                opacity="0.9"
+              />
+              <rect
+                x="9"
+                y="1"
+                width="6"
+                height="6"
+                rx="1"
+                fill="white"
+                opacity="0.6"
+              />
+              <rect
+                x="1"
+                y="9"
+                width="6"
+                height="6"
+                rx="1"
+                fill="white"
+                opacity="0.6"
+              />
+              <rect
+                x="9"
+                y="9"
+                width="6"
+                height="6"
+                rx="1"
+                fill="white"
+                opacity="0.9"
+              />
+            </svg>
+          </div>
+          <span class="font-display text-lg font-semibold text-gold"
+            >VisionID</span
+          >
+        </div>
+
+        <div class="flex items-center gap-4">
+          <!-- Theme Toggle -->
+          <button
+            onclick="toggleTheme()"
+            class="p-2 rounded-xl transition-colors hover:bg-gold/10"
+            style="border: 1px solid rgba(201, 168, 76, 0.2)"
+            title="Ganti Tema"
+          >
+            <svg id="theme-icon-dark" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2">
+              <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1-8.313-12.454z"/>
+            </svg>
+            <svg id="theme-icon-light" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2">
+              <circle cx="12" cy="12" r="5"/>
+              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+            </svg>
+          </button>
+
+          <!-- Device badge -->
+          <div
+            id="device-badge"
+            class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-mono"
+            style="
+              background: rgba(201, 168, 76, 0.06);
+              border: 1px solid rgba(201, 168, 76, 0.15);
+            "
+          >
+            <span
+              class="w-1.5 h-1.5 rounded-full bg-gold/50 animate-pulse"
+            ></span>
+            <span id="device-text" class="text-stone-500">Memuat…</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- =========================================================
+     MAIN CONTENT
+========================================================= -->
+    <main class="z-1 max-w-6xl mx-auto px-6 py-12">
+      <!-- Hero title -->
+      <div class="mb-12 text-center">
+        <h1
+          class="font-display text-4xl sm:text-5xl font-bold mb-3"
+          style="
+            background: linear-gradient(135deg, #f5e4b0, #c9a84c, #8a6a1a);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+          "
+        >
+          Klasifikasi Gambar
+        </h1>
+        <p class="text-stone-500 text-base font-body max-w-md mx-auto">
+          Sistem inferensi berbasis deep learning — <strong>EfficientNet-B0</strong>
+        </p>
+        <div class="gold-line h-px w-32 mx-auto mt-6"></div>
+      </div>
+
+      <!-- Grid Layout: Left (Settings) + Right (Upload + Result) -->
+      <div class="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-8">
+        <!-- =====================================================
+         LEFT COLUMN — SETTINGS
+    ===================================================== -->
+        <aside class="space-y-5">
+          <!-- Panel: Pengaturan Label -->
+          <div
+            class="rounded-2xl p-5 transition-colors"
+            style="
+              background: var(--panel-bg);
+              border: 1px solid var(--border-color);
+              box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+            "
+          >
+            <div class="flex items-center gap-2 mb-4">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <rect
+                  x="1"
+                  y="3"
+                  width="12"
+                  height="8"
+                  rx="2"
+                  stroke="#c9a84c"
+                  stroke-width="1.2"
+                />
+                <path
+                  d="M4 7h6M4 9.5h3"
+                  stroke="#c9a84c"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <span
+                class="text-xs font-semibold uppercase tracking-widest text-gold"
+                >Tampilan Label</span
+              >
+            </div>
+
+            <!-- Toggle -->
+            <div class="flex items-center justify-between">
+              <div>
+                <p
+                  class="text-sm font-medium"
+                  id="label-mode-text"
+                >
+                  Label Numerik
+                </p>
+                <p class="text-xs text-stone-500 mt-0.5" id="label-mode-sub">
+                  contoh: 041, …
+                </p>
+              </div>
+              <button
+                id="label-toggle"
+                onclick="toggleLabelMode()"
+                class="toggle-track relative w-12 h-6 rounded-full"
+                style="
+                  background: rgba(201, 168, 76, 0.15);
+                  border: 1px solid rgba(201, 168, 76, 0.3);
+                "
+              >
+                <span
+                  id="toggle-thumb"
+                  class="toggle-thumb absolute top-0.5 left-0.5 w-5 h-5 rounded-full shadow"
+                  style="
+                    background: #c9a84c;
+                    box-shadow: 0 2px 8px rgba(201, 168, 76, 0.4);
+                  "
+                ></span>
+              </button>
+            </div>
+
+            <!-- Label Mapping preview -->
+            <div
+              class="mt-4 rounded-xl overflow-hidden"
+              style="border: 1px solid rgba(201, 168, 76, 0.1)"
+            >
+              <div
+                class="px-3 py-2 text-xs text-stone-500 font-mono"
+                style="background: rgba(201, 168, 76, 0.05)"
+              >
+                Pemetaan Label (041–070)
+              </div>
+              <div id="label-preview" class="max-h-64 overflow-y-auto">
+                <!-- diisi JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel: True Label (opsional) -->
+          <div
+            class="rounded-2xl p-5 transition-colors"
+            style="
+              background: var(--panel-bg);
+              border: 1px solid var(--border-color);
+              box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+            "
+          >
+            <div class="flex items-center gap-2 mb-4">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path
+                  d="M7 1v6M7 7l3-3M7 7l-3-3"
+                  stroke="#c9a84c"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M1 10v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2"
+                  stroke="#c9a84c"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <span
+                class="text-xs font-semibold uppercase tracking-widest text-gold"
+                >Label Benar</span
+              >
+            </div>
+            <p class="text-xs text-stone-500 mb-3">
+              Isi jika ingin memverifikasi hasil.
+            </p>
+            <select
+              id="true-label-select"
+              class="w-full rounded-xl px-3 py-2.5 text-sm font-mono pr-8 cursor-pointer transition-colors"
+              style="
+                background: var(--input-bg);
+                border: 1px solid rgba(201, 168, 76, 0.2);
+              "
+            >
+              <option value="">— Tidak diisi —</option>
+            </select>
+          </div>
+        </aside>
+
+        <!-- =====================================================
+         RIGHT COLUMN — UPLOAD + RESULT
+    ===================================================== -->
+        <section class="space-y-6">
+          <!-- Upload Zone -->
+          <div
+            id="dropzone"
+            class="rounded-2xl relative flex flex-col items-center justify-center cursor-pointer transition-all"
+            style="min-height: 320px; background: var(--panel-bg)"
+            onclick="document.getElementById('file-input').click()"
+            ondragover="handleDragOver(event)"
+            ondragleave="handleDragLeave(event)"
+            ondrop="handleDrop(event)"
+          >
+            <input
+              type="file"
+              id="file-input"
+              accept="image/*"
+              class="hidden"
+              onchange="handleFileSelect(event)"
+            />
+
+            <!-- Placeholder state -->
+            <div
+              id="upload-placeholder"
+              class="flex flex-col items-center gap-4 py-10 px-6 text-center"
+            >
+              <div
+                class="w-16 h-16 rounded-2xl flex items-center justify-center"
+                style="
+                  background: rgba(201, 168, 76, 0.06);
+                  border: 1px solid rgba(201, 168, 76, 0.2);
+                "
+              >
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                  <path
+                    d="M14 4v14M14 4l-4 4M14 4l4 4"
+                    stroke="#c9a84c"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M4 18v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-4"
+                    stroke="#c9a84c"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                  />
+                  <rect
+                    x="4"
+                    y="12"
+                    width="5"
+                    height="4"
+                    rx="1"
+                    fill="rgba(201,168,76,0.2)"
+                  />
+                  <rect
+                    x="19"
+                    y="12"
+                    width="5"
+                    height="4"
+                    rx="1"
+                    fill="rgba(201,168,76,0.2)"
+                  />
+                </svg>
+              </div>
+              <div>
+                <p class="text-base font-semibold text-stone-200 mb-1">
+                  Seret & lepas gambar di sini
+                </p>
+                <p class="text-sm text-stone-500">
+                  atau
+                  <span
+                    class="text-gold underline underline-offset-2 cursor-pointer"
+                    >klik untuk memilih</span
+                  >
+                </p>
+                <p class="mt-2 text-xs text-stone-600">
+                  JPG, PNG, BMP, WEBP — ukuran bebas
+                </p>
+              </div>
+            </div>
+
+            <!-- Preview state (hidden by default) -->
+            <div
+              id="upload-preview"
+              class="hidden w-full h-full absolute inset-0 rounded-2xl overflow-hidden"
+            >
+              <img
+                id="preview-img"
+                src=""
+                alt="preview"
+                class="w-full h-full object-contain"
+                style="padding: 12px"
+              />
+              <!-- Re-upload hint -->
+              <div
+                class="absolute bottom-3 right-3 px-3 py-1.5 rounded-xl text-xs text-stone-400 font-body backdrop-blur"
+                style="
+                  background: rgba(7, 7, 14, 0.7);
+                  border: 1px solid rgba(255, 255, 255, 0.08);
+                "
+              >
+                Klik untuk ganti gambar
+              </div>
+            </div>
+          </div>
+
+          <!-- Classify Button -->
+          <button
+            id="btn-classify"
+            onclick="classify()"
+            disabled
+            class="w-full py-4 rounded-2xl text-sm font-semibold tracking-wider transition-all duration-200 relative overflow-hidden"
+            style="
+              background: linear-gradient(
+                135deg,
+                rgba(201, 168, 76, 0.15),
+                rgba(201, 168, 76, 0.08)
+              );
+              border: 1px solid rgba(201, 168, 76, 0.3);
+              color: rgba(201, 168, 76, 0.5);
+            "
+          >
+            <span id="btn-text">Pilih Gambar Terlebih Dahulu</span>
+            <div
+              id="btn-loader"
+              class="hidden absolute inset-0 flex items-center justify-center gap-2"
+              style="
+                background: linear-gradient(
+                  135deg,
+                  rgba(201, 168, 76, 0.2),
+                  rgba(201, 168, 76, 0.1)
+                );
+              "
+            >
+              <svg
+                class="animate-spin-slow w-4 h-4"
+                viewBox="0 0 16 16"
+                fill="none"
+              >
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="6"
+                  stroke="rgba(201,168,76,0.3)"
+                  stroke-width="2"
+                />
+                <path
+                  d="M8 2a6 6 0 0 1 6 6"
+                  stroke="#c9a84c"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <span class="text-gold text-sm font-semibold">Menganalisis…</span>
+            </div>
+          </button>
+
+          <!-- Error Message -->
+          <div
+            id="error-box"
+            class="hidden rounded-xl px-4 py-3 text-sm"
+            style="
+              background: rgba(248, 113, 113, 0.08);
+              border: 1px solid rgba(248, 113, 113, 0.25);
+              color: #f87171;
+            "
+          >
+            <span id="error-text"></span>
+          </div>
+
+          <!-- ===================================================
+           RESULT CARD
+      =================================================== -->
+          <div
+            id="result-card"
+            class="hidden result-card rounded-2xl overflow-hidden transition-colors"
+            style="
+              background: var(--panel-bg);
+              border: 1px solid var(--border-color);
+              box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
+            "
+          >
+            <!-- Result header -->
+            <div
+              class="px-6 py-4 flex items-center justify-between"
+              style="border-bottom: 1px solid rgba(201, 168, 76, 0.1)"
+            >
+              <span
+                class="text-xs font-semibold uppercase tracking-widest text-gold"
+                >Hasil Klasifikasi</span
+              >
+              <span
+                id="result-status-badge"
+                class="px-3 py-1 rounded-full text-xs font-semibold font-mono"
+              ></span>
+            </div>
+
+            <!-- Image + Main Prediction -->
+            <div class="p-6">
+              <div class="flex flex-col sm:flex-row gap-6">
+                <!-- Image thumbnail -->
+                <div class="flex-none">
+                  <div
+                    class="w-32 h-32 rounded-xl overflow-hidden"
+                    style="border: 1px solid rgba(201, 168, 76, 0.15)"
+                  >
+                    <img
+                      id="result-img"
+                      src=""
+                      alt="result"
+                      class="w-full h-full object-cover"
+                    />
+                  </div>
+                </div>
+
+                <!-- Prediction details -->
+                <div class="flex-1 flex flex-col justify-center gap-3">
+                  <!-- Label prediction -->
+                  <div>
+                    <p
+                      class="text-xs text-stone-500 mb-1 uppercase tracking-widest"
+                    >
+                      Prediksi
+                    </p>
+                    <div class="flex items-center gap-3 flex-wrap">
+                      <span
+                        id="pred-numeric-badge"
+                        class="font-mono text-2xl font-bold text-gold"
+                      ></span>
+                      <span
+                        id="pred-name-badge"
+                        class="font-display text-xl font-semibold"
+                      ></span>
+                    </div>
+                  </div>
+
+                  <!-- True label row -->
+                  <div id="true-label-row" class="hidden">
+                    <p
+                      class="text-xs text-stone-500 mb-1 uppercase tracking-widest"
+                    >
+                      Label Benar
+                    </p>
+                    <div class="flex items-center gap-3 flex-wrap">
+                      <span
+                        id="true-numeric-badge"
+                        class="font-mono text-base font-medium text-stone-400"
+                      ></span>
+                      <span
+                        id="true-name-badge"
+                        class="font-body text-base text-stone-400"
+                      ></span>
+                    </div>
+                  </div>
+
+                  <!-- Confidence bar -->
+                  <div>
+                    <div class="flex items-center justify-between mb-1.5">
+                      <span
+                        class="text-xs text-stone-500 uppercase tracking-widest"
+                        >Confidence</span
+                      >
+                      <span
+                        id="confidence-value"
+                        class="font-mono text-sm font-semibold text-gold"
+                      ></span>
+                    </div>
+                    <div
+                      class="h-2 rounded-full overflow-hidden"
+                      style="background: rgba(201, 168, 76, 0.1)"
+                    >
+                      <div
+                        id="confidence-bar"
+                        class="bar-fill h-2 rounded-full"
+                        style="
+                          width: 0%;
+                          background: linear-gradient(90deg, #c9a84c, #f0c96e);
+                        "
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Gold divider -->
+            <div class="gold-line h-px mx-6"></div>
+
+            <!-- Top-5 -->
+            <div class="px-6 py-5">
+              <p
+                class="text-xs font-semibold uppercase tracking-widest text-stone-500 mb-4"
+              >
+                Top-5 Prediksi
+              </p>
+              <div id="top5-list" class="space-y-3">
+                <!-- diisi JS -->
+              </div>
+            </div>
+          </div>
+          <!-- end result-card -->
+        </section>
+      </div>
+    </main>
+
+    <!-- =========================================================
+     FOOTER
+========================================================= -->
+    <footer
+      class="z-1 mt-16 py-8 border-t transition-colors"
+      style="border-color: rgba(201, 168, 76, 0.1); background: var(--panel-bg)"
+    >
+      <div
+        class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-3"
+      >
+        <p class="text-xs text-stone-500 font-body">
+          VisionID — Sistem Klasifikasi Gambar Berbasis Deep Learning
+        </p>
+        <div class="flex items-center gap-4 text-xs text-stone-500 font-mono">
+          <a
+            href="/docs"
+            target="_blank"
+            class="hover:text-gold transition-colors"
+            >API Docs</a
+          >
+          <span class="text-stone-700">·</span>
+          <a
+            href="/api/health"
+            target="_blank"
+            class="hover:text-gold transition-colors"
+            >Health</a
+          >
+          <span class="text-stone-700">·</span>
+          <span id="footer-device" class="text-stone-700">—</span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- =========================================================
+     JAVASCRIPT
+========================================================= -->
+    <script>
+      // ============================================================
+      // STATE
+      // ============================================================
+      const API = ""; // kosong = relative (FastAPI serve frontend)
+      let useNamedLabel = false;
+      let selectedFile = null;
+      let isDark = true;
+
+      const NUMERIC_LABELS = Array.from({ length: 30 }, (_, i) =>
+        String(41 + i).padStart(3, "0"),
+      );
+      const NAMED_LABELS = [
+        "Andi Pratama",
+        "Budi Santoso",
+        "Citra Dewi",
+        "Dian Rahayu",
+        "Eko Purnomo",
+        "Fitri Wulandari",
+        "Gilang Ramadan",
+        "Hendra Wijaya",
+        "Indah Permata",
+        "Joko Susilo",
+        "Kartika Sari",
+        "Lestari Ningrum",
+        "Muhammad Rizki",
+        "Novi Anggraeni",
+        "Okta Firmansyah",
+        "Putri Maharani",
+        "Qori Handayani",
+        "Rizal Fauzan",
+        "Sinta Melinda",
+        "Teguh Prasetyo",
+        "Umi Kalsum",
+        "Vina Octavia",
+        "Wahyu Hidayat",
+        "Xena Septiana",
+        "Yoga Anggara",
+        "Zahra Nurlita",
+        "Agus Kurniawan",
+        "Bella Kusuma",
+        "Cahyo Nugroho",
+        "Dewi Anggraini",
+      ];
+
+      // ============================================================
+      // INIT
+      // ============================================================
+      window.addEventListener("DOMContentLoaded", () => {
+        // Load preference
+        const savedTheme = localStorage.getItem("theme");
+        if (savedTheme === "light") toggleTheme(false);
+
+        fetchHealth();
+        renderLabelPreview();
+        populateTrueLabelDropdown();
+      });
+
+      // ============================================================
+      // THEME TOGGLE
+      // ============================================================
+      function toggleTheme(shouldToggle = true) {
+        if (shouldToggle) isDark = !isDark;
+        else isDark = false; // direct set to light if called from init
+
+        const body = document.body;
+        const iconDark = document.getElementById("theme-icon-dark");
+        const iconLight = document.getElementById("theme-icon-light");
+
+        if (isDark) {
+          body.classList.remove("light");
+          iconDark.classList.add("hidden");
+          iconLight.classList.remove("hidden");
+          localStorage.setItem("theme", "dark");
+        } else {
+          body.classList.add("light");
+          iconDark.classList.remove("hidden");
+          iconLight.classList.add("hidden");
+          localStorage.setItem("theme", "light");
+        }
+      }
+
+      // ============================================================
+      // HEALTH CHECK
+      // ============================================================
+      async function fetchHealth() {
+        try {
+          const r = await fetch(`${API}/api/health`);
+          const d = await r.json();
+          const gpu = d.gpu_name ? `GPU · ${d.gpu_name}` : "CPU Only";
+          document.getElementById("device-text").textContent = gpu;
+          document.getElementById("footer-device").textContent =
+            `Device: ${d.device.toUpperCase()}`;
+          // green dot if GPU
+          const dot = document.querySelector("#device-badge span.rounded-full");
+          if (d.cuda_available) {
+            dot.classList.replace("bg-gold/50", "bg-green-400");
+          }
+        } catch {
+          document.getElementById("device-text").textContent =
+            "Backend offline";
+        }
+      }
+
+      // ============================================================
+      // LABEL MODE TOGGLE
+      // ============================================================
+      function toggleLabelMode() {
+        useNamedLabel = !useNamedLabel;
+        const thumb = document.getElementById("toggle-thumb");
+        const modeText = document.getElementById("label-mode-text");
+        const modeSub = document.getElementById("label-mode-sub");
+
+        if (useNamedLabel) {
+          thumb.style.transform = "translateX(24px)";
+          modeText.textContent = "Label Nama";
+          modeSub.textContent = "contoh: Andi Pratama, …";
+        } else {
+          thumb.style.transform = "translateX(0)";
+          modeText.textContent = "Label Numerik";
+          modeSub.textContent = "contoh: 041, …";
+        }
+        renderLabelPreview();
+        populateTrueLabelDropdown();
+      }
+
+      // ============================================================
+      // LABEL PREVIEW
+      // ============================================================
+      function renderLabelPreview() {
+        const el = document.getElementById("label-preview");
+        el.innerHTML = "";
+        for (let i = 0; i < 30; i++) {
+          const row = document.createElement("div");
+          row.className =
+            "flex items-center justify-between px-3 py-1.5 text-xs border-b";
+          row.style.borderColor = "rgba(201,168,76,0.1)";
+          row.style.animationDelay = `${i * 0.01}s`;
+          row.innerHTML = `
+      <span class="font-mono text-stone-500">${NUMERIC_LABELS[i]}</span>
+      <span class="${useNamedLabel ? "font-body" : "font-mono"}">${useNamedLabel ? NAMED_LABELS[i] : NUMERIC_LABELS[i]}</span>
+    `;
+          el.appendChild(row);
+        }
+      }
+
+      // ============================================================
+      // TRUE LABEL DROPDOWN
+      // ============================================================
+      function populateTrueLabelDropdown() {
+        const sel = document.getElementById("true-label-select");
+        const current = sel.value;
+        sel.innerHTML = '<option value="">— Tidak diisi —</option>';
+        for (let i = 0; i < 30; i++) {
+          const opt = document.createElement("option");
+          opt.value = NUMERIC_LABELS[i]; // kirim selalu format numerik ke backend
+          opt.textContent = useNamedLabel
+            ? `${NUMERIC_LABELS[i]} — ${NAMED_LABELS[i]}`
+            : NUMERIC_LABELS[i];
+          sel.appendChild(opt);
+        }
+        // restore selection
+        if (current) sel.value = current;
+      }
+
+      // ============================================================
+      // DRAG & DROP
+      // ============================================================
+      function handleDragOver(e) {
+        e.preventDefault();
+        document.getElementById("dropzone").classList.add("drag-over");
+      }
+      function handleDragLeave(e) {
+        document.getElementById("dropzone").classList.remove("drag-over");
+      }
+      function handleDrop(e) {
+        e.preventDefault();
+        document.getElementById("dropzone").classList.remove("drag-over");
+        const files = e.dataTransfer.files;
+        if (files.length > 0) processFile(files[0]);
+      }
+      function handleFileSelect(e) {
+        if (e.target.files.length > 0) processFile(e.target.files[0]);
+      }
+
+      // ============================================================
+      // FILE PROCESSING
+      // ============================================================
+      function processFile(file) {
+        if (!file.type.startsWith("image/")) {
+          showError("File harus berupa gambar (JPG, PNG, BMP, WEBP).");
+          return;
+        }
+        selectedFile = file;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const src = e.target.result;
+          document.getElementById("preview-img").src = src;
+          document.getElementById("result-img").src = src;
+          document.getElementById("upload-placeholder").classList.add("hidden");
+          document.getElementById("upload-preview").classList.remove("hidden");
+          setButtonReady(true);
+          hideError();
+          // hide old result
+          document.getElementById("result-card").classList.add("hidden");
+        };
+        reader.readAsDataURL(file);
+      }
+
+      // ============================================================
+      // BUTTON STATE
+      // ============================================================
+      function setButtonReady(ready) {
+        const btn = document.getElementById("btn-classify");
+        const txt = document.getElementById("btn-text");
+        if (ready) {
+          btn.disabled = false;
+          btn.style.background =
+            "linear-gradient(135deg, rgba(201,168,76,0.25), rgba(201,168,76,0.12))";
+          btn.style.color = "#c9a84c";
+          btn.style.borderColor = "rgba(201,168,76,0.5)";
+          btn.style.cursor = "pointer";
+          btn.style.boxShadow = "0 0 24px rgba(201,168,76,0.1)";
+          txt.textContent = "✦  Klasifikasi Gambar";
+        } else {
+          btn.disabled = true;
+          btn.style.background =
+            "linear-gradient(135deg, rgba(201,168,76,0.1), rgba(201,168,76,0.05))";
+          btn.style.color = "rgba(201,168,76,0.4)";
+          btn.style.borderColor = "rgba(201,168,76,0.2)";
+          btn.style.cursor = "not-allowed";
+          btn.style.boxShadow = "none";
+          txt.textContent = "Pilih Gambar Terlebih Dahulu";
+        }
+      }
+
+      function setButtonLoading(loading) {
+        const btn = document.getElementById("btn-classify");
+        const txt = document.getElementById("btn-text");
+        const loader = document.getElementById("btn-loader");
+        btn.disabled = loading;
+        txt.classList.toggle("hidden", loading);
+        loader.classList.toggle("hidden", !loading);
+      }
+
+      // ============================================================
+      // ERROR
+      // ============================================================
+      function showError(msg) {
+        const box = document.getElementById("error-box");
+        document.getElementById("error-text").textContent = msg;
+        box.classList.remove("hidden");
+      }
+      function hideError() {
+        document.getElementById("error-box").classList.add("hidden");
+      }
+
+      // ============================================================
+      // CLASSIFY
+      // ============================================================
+      async function classify() {
+        if (!selectedFile) {
+          showError("Pilih gambar terlebih dahulu.");
+          return;
+        }
+
+        const trueLabel = document.getElementById("true-label-select").value;
+
+        hideError();
+        setButtonLoading(true);
+        document.getElementById("result-card").classList.add("hidden");
+
+        const form = new FormData();
+        form.append("file", selectedFile);
+        // backend akan menggunakan default efficientnet
+        if (trueLabel) form.append("true_label", trueLabel);
+
+        try {
+          const r = await fetch(`${API}/api/predict`, {
+            method: "POST",
+            body: form,
+          });
+
+          if (!r.ok) {
+            const err = await r.json();
+            throw new Error(err.detail || `HTTP ${r.status}`);
+          }
+
+          const data = await r.json();
+          renderResult(data);
+        } catch (e) {
+          showError(`Gagal: ${e.message}`);
+        } finally {
+          setButtonLoading(false);
+          setButtonReady(true);
+        }
+      }
+
+      // ============================================================
+      // RENDER RESULT
+      // ============================================================
+      function renderResult(data) {
+        const card = document.getElementById("result-card");
+        card.classList.remove("hidden");
+
+        // --- Status badge ---
+        const badge = document.getElementById("result-status-badge");
+        if (data.is_correct === true) {
+          badge.className =
+            "px-3 py-1 rounded-full text-xs font-semibold font-mono tag-correct";
+          badge.textContent = "✓ BENAR";
+        } else if (data.is_correct === false) {
+          badge.className =
+            "px-3 py-1 rounded-full text-xs font-semibold font-mono tag-wrong";
+          badge.textContent = "✗ SALAH";
+        } else {
+          badge.className =
+            "px-3 py-1 rounded-full text-xs font-semibold font-mono tag-neutral";
+          badge.textContent = "◈ Tanpa Verifikasi";
+        }
+
+        // --- Predicted labels ---
+        const numEl = document.getElementById("pred-numeric-badge");
+        const nameEl = document.getElementById("pred-name-badge");
+
+        if (data.is_correct === false) {
+          numEl.style.color = "#f87171";
+          nameEl.style.color = "#f87171";
+        } else if (data.is_correct === true) {
+          numEl.style.color = "#4ade80";
+          nameEl.style.color = "#4ade80";
+        } else {
+          numEl.style.color = "#c9a84c";
+        }
+
+        if (useNamedLabel) {
+          numEl.textContent = `[${data.predicted_label_numeric}]`;
+          nameEl.textContent = data.predicted_label_named;
+          numEl.classList.add("text-base");
+          nameEl.classList.remove("hidden");
+        } else {
+          numEl.textContent = data.predicted_label_numeric;
+          nameEl.textContent = `— ${data.predicted_label_named}`;
+          numEl.classList.remove("text-base");
+          nameEl.classList.remove("hidden");
+        }
+
+        // --- True label row ---
+        const trueRow = document.getElementById("true-label-row");
+        const trueVal = document.getElementById("true-label-select").value;
+        if (trueVal) {
+          trueRow.classList.remove("hidden");
+          const idx = NUMERIC_LABELS.indexOf(trueVal);
+          document.getElementById("true-numeric-badge").textContent = trueVal;
+          document.getElementById("true-name-badge").textContent =
+            idx >= 0 ? NAMED_LABELS[idx] : "";
+        } else {
+          trueRow.classList.add("hidden");
+        }
+
+        // --- Confidence bar ---
+        const conf = data.confidence;
+        document.getElementById("confidence-value").textContent =
+          `${conf.toFixed(2)}%`;
+        setTimeout(() => {
+          document.getElementById("confidence-bar").style.width =
+            `${Math.min(conf, 100)}%`;
+          // color based on confidence
+          let barColor;
+          if (conf >= 80) barColor = "linear-gradient(90deg, #4ade80, #86efac)";
+          else if (conf >= 50)
+            barColor = "linear-gradient(90deg, #c9a84c, #f0c96e)";
+          else barColor = "linear-gradient(90deg, #f87171, #fca5a5)";
+          document.getElementById("confidence-bar").style.background = barColor;
+        }, 50);
+
+        // --- Top-5 ---
+        const top5El = document.getElementById("top5-list");
+        top5El.innerHTML = "";
+        data.top5.forEach((item, idx) => {
+          const isTop = idx === 0;
+          const displayLabel = useNamedLabel
+            ? `<span class="font-mono text-stone-500 text-xs mr-1.5">[${item.label_numeric}]</span>${item.label_named}`
+            : `<span class="font-mono">${item.label_numeric}</span> <span class="text-stone-500 text-xs">— ${item.label_named}</span>`;
+
+          const row = document.createElement("div");
+          row.className = `flex items-center gap-3 fade-in delay-${idx + 1}`;
+          row.innerHTML = `
+      <span class="flex-none w-5 text-xs font-mono text-center ${isTop ? "text-gold" : "text-stone-600"}">${item.rank}</span>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm truncate ${isTop ? "font-medium" : "text-stone-400"}">${displayLabel}</span>
+          <span class="flex-none ml-2 text-xs font-mono ${isTop ? "text-gold" : "text-stone-500"}">${item.probability.toFixed(2)}%</span>
+        </div>
+        <div class="top5-bar h-1.5" style="background: rgba(201, 168, 76, 0.1)">
+          <div class="top5-bar-fill" style="width:0%" data-target="${item.probability}"></div>
+        </div>
+      </div>
+    `;
+          top5El.appendChild(row);
+        });
+
+        // animate bars
+        setTimeout(() => {
+          document.querySelectorAll(".top5-bar-fill").forEach((bar) => {
+            const target = parseFloat(bar.dataset.target);
+            // normalize against top score
+            const topScore = data.top5[0].probability;
+            bar.style.width = `${(target / topScore) * 100}%`;
+            if (
+              bar.closest(".flex").querySelector("span:first-child")
+                .textContent === "1"
+            ) {
+              bar.style.background = "linear-gradient(90deg, #c9a84c, #f0c96e)";
+            } else {
+              bar.style.background = "rgba(201, 168, 76, 0.3)";
+            }
+          });
+        }, 100);
+
+        // scroll into view
+        card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    </script>
+  </body>
+</html>
