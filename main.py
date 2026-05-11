@@ -264,10 +264,17 @@ async def predict(
     tensor = PREPROCESS(img).unsqueeze(0).to(device)
     with torch.no_grad():
         logits = model(tensor)
-        probs: list[float] = torch.softmax(logits, dim=1).squeeze().cpu().tolist()
+        # Ensure probs is always a list of floats, handling 1D or 2D logits
+        probs_tensor = torch.softmax(logits, dim=1).squeeze()
+        if probs_tensor.dim() == 0:
+            probs = [probs_tensor.item()]
+        else:
+            probs = probs_tensor.cpu().tolist()
 
     pred_idx: int = int(probs.index(max(probs)))
     confidence: float = round(probs[pred_idx] * 100, 4)
+    
+    print(f"[DEBUG] pred_idx: {pred_idx}, confidence: {confidence}%, probs_len: {len(probs)}")
 
     # 4. Cek kebenaran (opsional)
     is_correct = None
@@ -280,29 +287,49 @@ async def predict(
         # Coba parsing integer langsung (misal user kirim "5")
         elif tl.isdigit():
             idx = int(tl)
-            if 0 <= idx < NUM_CLASSES:
+            if 0 <= idx < len(LABELS_NUMERIC):
                 is_correct = idx == pred_idx
 
-    # 5. Top-5
-    sorted_idx = sorted(range(NUM_CLASSES), key=lambda i: probs[i], reverse=True)
+    # 5. Top-5 & All Probabilities
+    # Handle cases where probs length doesn't match NUM_CLASSES or is very small
+    num_probs = len(probs)
+    sorted_idx = sorted(range(num_probs), key=lambda i: probs[i], reverse=True)
+    
+    def get_label_numeric(i):
+        return LABELS_NUMERIC[i] if i < len(LABELS_NUMERIC) else f"Unknown({i})"
+    
+    def get_label_named(i):
+        return LABELS_NAMED[i] if i < len(LABELS_NAMED) else f"Unknown Label {i}"
+
     top5 = [
         {
             "rank": rank + 1,
             "index": i,
-            "label_numeric": LABELS_NUMERIC[i],
-            "label_named": LABELS_NAMED[i],
+            "label_numeric": get_label_numeric(i),
+            "label_named": get_label_named(i),
             "probability": round(probs[i] * 100, 4),
         }
         for rank, i in enumerate(sorted_idx[:5])
     ]
 
+    all_probs = [
+        {
+            "index": i,
+            "label_numeric": get_label_numeric(i),
+            "label_named": get_label_named(i),
+            "probability": round(probs[i] * 100, 4),
+        }
+        for i in range(num_probs)
+    ]
+
     return JSONResponse({
         "predicted_index": pred_idx,
-        "predicted_label_numeric": LABELS_NUMERIC[pred_idx],
-        "predicted_label_named": LABELS_NAMED[pred_idx],
+        "predicted_label_numeric": get_label_numeric(pred_idx),
+        "predicted_label_named": get_label_named(pred_idx),
         "confidence": confidence,
         "is_correct": is_correct,
         "top5": top5,
+        "all_probs": all_probs,
     })
 
 

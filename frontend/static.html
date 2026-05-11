@@ -818,21 +818,6 @@
                 </div>
               </div>
             </div>
-
-            <!-- Gold divider -->
-            <div class="gold-line h-px mx-6"></div>
-
-            <!-- Top-5 -->
-            <div class="px-6 py-5">
-              <p
-                class="text-xs font-semibold uppercase tracking-widest text-stone-500 mb-4"
-              >
-                Top-5 Prediksi
-              </p>
-              <div id="top5-list" class="space-y-3">
-                <!-- diisi JS -->
-              </div>
-            </div>
           </div>
           <!-- end result-card -->
         </section>
@@ -884,54 +869,42 @@
       let selectedFile = null;
       let isDark = true;
 
-      const NUMERIC_LABELS = Array.from({ length: 30 }, (_, i) =>
-        String(41 + i).padStart(3, "0"),
-      );
-      const NAMED_LABELS = [
-        "Andi Pratama",
-        "Budi Santoso",
-        "Citra Dewi",
-        "Dian Rahayu",
-        "Eko Purnomo",
-        "Fitri Wulandari",
-        "Gilang Ramadan",
-        "Hendra Wijaya",
-        "Indah Permata",
-        "Joko Susilo",
-        "Kartika Sari",
-        "Lestari Ningrum",
-        "Muhammad Rizki",
-        "Novi Anggraeni",
-        "Okta Firmansyah",
-        "Putri Maharani",
-        "Qori Handayani",
-        "Rizal Fauzan",
-        "Sinta Melinda",
-        "Teguh Prasetyo",
-        "Umi Kalsum",
-        "Vina Octavia",
-        "Wahyu Hidayat",
-        "Xena Septiana",
-        "Yoga Anggara",
-        "Zahra Nurlita",
-        "Agus Kurniawan",
-        "Bella Kusuma",
-        "Cahyo Nugroho",
-        "Dewi Anggraini",
-      ];
+      let NUMERIC_LABELS = [];
+      let NAMED_LABELS = [];
 
       // ============================================================
       // INIT
       // ============================================================
-      window.addEventListener("DOMContentLoaded", () => {
+      window.addEventListener("DOMContentLoaded", async () => {
         // Load preference
         const savedTheme = localStorage.getItem("theme");
         if (savedTheme === "light") toggleTheme(false);
 
         fetchHealth();
-        renderLabelPreview();
-        populateTrueLabelDropdown();
+        fetchModels();
+        await fetchLabels(); // Tunggu label selesai dimuat
       });
+
+      // ============================================================
+      // FETCH LABELS
+      // ============================================================
+      async function fetchLabels() {
+        try {
+          const r = await fetch(`${API}/api/labels`);
+          const d = await r.json();
+          NUMERIC_LABELS = d.numeric;
+          NAMED_LABELS = d.named;
+          renderLabelPreview();
+          populateTrueLabelDropdown();
+        } catch (e) {
+          console.error("Gagal memuat label:", e);
+          // Fallback sederhana jika API gagal
+          NUMERIC_LABELS = Array.from({ length: 30 }, (_, i) => String(41 + i).padStart(3, "0"));
+          NAMED_LABELS = NUMERIC_LABELS.map(n => `Label ${n}`);
+          renderLabelPreview();
+          populateTrueLabelDropdown();
+        }
+      }
 
       // ============================================================
       // THEME TOGGLE
@@ -980,6 +953,53 @@
       }
 
       // ============================================================
+      // FETCH AVAILABLE MODELS
+      // ============================================================
+      async function fetchModels() {
+        const icon = document.getElementById("refresh-icon");
+        if (icon) icon.classList.add("animate-spin-slow");
+
+        try {
+          const r = await fetch(`${API}/api/models`);
+          const d = await r.json();
+          const sel = document.getElementById("sel-file");
+          if (!sel) return;
+          sel.innerHTML = "";
+
+          if (!d.models || d.models.length === 0) {
+            sel.innerHTML =
+              '<option value="">— Tidak ada file model —</option>';
+            document.getElementById("model-hint").innerHTML =
+              '<span class="text-amber-500">⚠ Belum ada file model.</span> Letakkan di <code class="font-mono">models/</code>';
+          } else {
+            d.models.forEach((m) => {
+              const opt = document.createElement("option");
+              opt.value = m.filename;
+              opt.textContent = `${m.filename} (${m.size_mb} MB)`;
+              sel.appendChild(opt);
+            });
+            document.getElementById("model-hint").innerHTML =
+              `<span class="text-green-500/70">${d.models.length} model ditemukan.</span>`;
+
+            // auto-select architecture jika terdeteksi
+            autoSelectArch(d.models[0]);
+          }
+        } catch {
+          const sel = document.getElementById("sel-file");
+          if (sel) sel.innerHTML = '<option value="">— Gagal menghubungi server —</option>';
+        } finally {
+          if (icon) setTimeout(() => icon.classList.remove("animate-spin-slow"), 600);
+        }
+      }
+
+      function autoSelectArch(modelInfo) {
+        if (modelInfo.suggested_architecture) {
+          const selArch = document.getElementById("sel-arch");
+          if (selArch) selArch.value = modelInfo.suggested_architecture;
+        }
+      }
+
+      // ============================================================
       // LABEL MODE TOGGLE
       // ============================================================
       function toggleLabelMode() {
@@ -1006,8 +1026,9 @@
       // ============================================================
       function renderLabelPreview() {
         const el = document.getElementById("label-preview");
+        if (!el) return;
         el.innerHTML = "";
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < NUMERIC_LABELS.length; i++) {
           const row = document.createElement("div");
           row.className =
             "flex items-center justify-between px-3 py-1.5 text-xs border-b";
@@ -1026,9 +1047,10 @@
       // ============================================================
       function populateTrueLabelDropdown() {
         const sel = document.getElementById("true-label-select");
+        if (!sel) return;
         const current = sel.value;
         sel.innerHTML = '<option value="">— Tidak diisi —</option>';
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < NUMERIC_LABELS.length; i++) {
           const opt = document.createElement("option");
           opt.value = NUMERIC_LABELS[i]; // kirim selalu format numerik ke backend
           opt.textContent = useNamedLabel
@@ -1141,6 +1163,8 @@
           return;
         }
 
+        const arch = "efficientnet";
+        const modelFile = "restored_model.pth";
         const trueLabel = document.getElementById("true-label-select").value;
 
         hideError();
@@ -1149,7 +1173,8 @@
 
         const form = new FormData();
         form.append("file", selectedFile);
-        // backend akan menggunakan default efficientnet
+        form.append("architecture", arch);
+        form.append("model_file", modelFile);
         if (trueLabel) form.append("true_label", trueLabel);
 
         try {
@@ -1177,7 +1202,12 @@
       // RENDER RESULT
       // ============================================================
       function renderResult(data) {
+        console.log("Prediction data received:", data);
         const card = document.getElementById("result-card");
+        if (!card) {
+          console.error("Critical: result-card element not found!");
+          return;
+        }
         card.classList.remove("hidden");
 
         // --- Status badge ---
@@ -1208,6 +1238,7 @@
           nameEl.style.color = "#4ade80";
         } else {
           numEl.style.color = "#c9a84c";
+          nameEl.style.color = ""; // Reset color
         }
 
         if (useNamedLabel) {
@@ -1228,72 +1259,39 @@
         if (trueVal) {
           trueRow.classList.remove("hidden");
           const idx = NUMERIC_LABELS.indexOf(trueVal);
+          
+          // Cari probabilitas untuk true label ini dari data.all_probs
+          let trueProb = 0;
+          if (data.all_probs && Array.isArray(data.all_probs)) {
+            const found = data.all_probs.find(p => p.label_numeric === trueVal);
+            if (found) trueProb = found.probability;
+          }
+
           document.getElementById("true-numeric-badge").textContent = trueVal;
-          document.getElementById("true-name-badge").textContent =
-            idx >= 0 ? NAMED_LABELS[idx] : "";
+          const nameSpan = idx >= 0 ? NAMED_LABELS[idx] : "Unknown";
+          document.getElementById("true-name-badge").innerHTML = 
+            `${nameSpan} <span class="ml-2 text-xs font-mono text-stone-500">(${trueProb.toFixed(2)}%)</span>`;
         } else {
           trueRow.classList.add("hidden");
         }
 
         // --- Confidence bar ---
-        const conf = data.confidence;
+        const conf = data.confidence || 0;
         document.getElementById("confidence-value").textContent =
           `${conf.toFixed(2)}%`;
         setTimeout(() => {
-          document.getElementById("confidence-bar").style.width =
-            `${Math.min(conf, 100)}%`;
-          // color based on confidence
-          let barColor;
-          if (conf >= 80) barColor = "linear-gradient(90deg, #4ade80, #86efac)";
-          else if (conf >= 50)
-            barColor = "linear-gradient(90deg, #c9a84c, #f0c96e)";
-          else barColor = "linear-gradient(90deg, #f87171, #fca5a5)";
-          document.getElementById("confidence-bar").style.background = barColor;
+          const bar = document.getElementById("confidence-bar");
+          if (bar) {
+            bar.style.width = `${Math.min(conf, 100)}%`;
+            // color based on confidence
+            let barColor;
+            if (conf >= 80) barColor = "linear-gradient(90deg, #4ade80, #86efac)";
+            else if (conf >= 50)
+              barColor = "linear-gradient(90deg, #c9a84c, #f0c96e)";
+            else barColor = "linear-gradient(90deg, #f87171, #fca5a5)";
+            bar.style.background = barColor;
+          }
         }, 50);
-
-        // --- Top-5 ---
-        const top5El = document.getElementById("top5-list");
-        top5El.innerHTML = "";
-        data.top5.forEach((item, idx) => {
-          const isTop = idx === 0;
-          const displayLabel = useNamedLabel
-            ? `<span class="font-mono text-stone-500 text-xs mr-1.5">[${item.label_numeric}]</span>${item.label_named}`
-            : `<span class="font-mono">${item.label_numeric}</span> <span class="text-stone-500 text-xs">— ${item.label_named}</span>`;
-
-          const row = document.createElement("div");
-          row.className = `flex items-center gap-3 fade-in delay-${idx + 1}`;
-          row.innerHTML = `
-      <span class="flex-none w-5 text-xs font-mono text-center ${isTop ? "text-gold" : "text-stone-600"}">${item.rank}</span>
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-sm truncate ${isTop ? "font-medium" : "text-stone-400"}">${displayLabel}</span>
-          <span class="flex-none ml-2 text-xs font-mono ${isTop ? "text-gold" : "text-stone-500"}">${item.probability.toFixed(2)}%</span>
-        </div>
-        <div class="top5-bar h-1.5" style="background: rgba(201, 168, 76, 0.1)">
-          <div class="top5-bar-fill" style="width:0%" data-target="${item.probability}"></div>
-        </div>
-      </div>
-    `;
-          top5El.appendChild(row);
-        });
-
-        // animate bars
-        setTimeout(() => {
-          document.querySelectorAll(".top5-bar-fill").forEach((bar) => {
-            const target = parseFloat(bar.dataset.target);
-            // normalize against top score
-            const topScore = data.top5[0].probability;
-            bar.style.width = `${(target / topScore) * 100}%`;
-            if (
-              bar.closest(".flex").querySelector("span:first-child")
-                .textContent === "1"
-            ) {
-              bar.style.background = "linear-gradient(90deg, #c9a84c, #f0c96e)";
-            } else {
-              bar.style.background = "rgba(201, 168, 76, 0.3)";
-            }
-          });
-        }, 100);
 
         // scroll into view
         card.scrollIntoView({ behavior: "smooth", block: "nearest" });
