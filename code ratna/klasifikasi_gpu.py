@@ -12,6 +12,10 @@ from torch.utils.data import DataLoader
 
 from torchvision import datasets, transforms, models
 from sklearn.metrics import confusion_matrix
+import pillow_heif
+
+# Registrasi agar Pillow bisa membaca file HEIC/HEIF
+pillow_heif.register_heif_opener()
 
 torch.backends.cudnn.benchmark = True
 

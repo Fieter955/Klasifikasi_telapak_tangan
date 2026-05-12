@@ -8,6 +8,7 @@ Lalu buka browser: http://localhost:8011
 """
 
 import io
+import base64
 from pathlib import Path
 
 import torch
@@ -17,7 +18,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
+from pillow_heif import register_heif_opener
 from torchvision import models as tmodels
+
+# Registrasi agar Pillow bisa membaca file HEIC/HEIF
+register_heif_opener()
 
 from model_def import (
     AlexNetCustom,
@@ -221,6 +226,29 @@ def get_labels():
 
 
 # ----------------------------------------------------------
+# KONVERSI GAMBAR (untuk preview HEIC)
+# ----------------------------------------------------------
+
+@app.post("/api/convert", tags=["Sistem"])
+async def convert_image(
+    file: UploadFile = File(..., description="Gambar untuk dikonversi ke JPEG")
+):
+    """
+    Menerima gambar apa pun (termasuk HEIC) dan mengembalikan Base64 JPEG.
+    Digunakan agar frontend bisa menampilkan preview HEIC.
+    """
+    contents = await file.read()
+    try:
+        img = Image.open(io.BytesIO(contents)).convert("RGB")
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG", quality=80)
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return JSONResponse({"image_data_uri": f"data:image/jpeg;base64,{img_str}"})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gagal mengonversi gambar: {e}")
+
+
+# ----------------------------------------------------------
 # PREDIKSI
 # ----------------------------------------------------------
 
@@ -245,6 +273,12 @@ async def predict(
         img = Image.open(io.BytesIO(contents)).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="File bukan gambar yang valid.")
+
+    # 1a. Konversi gambar ke base64 agar frontend bisa menampilkan (terutama untuk HEIC)
+    buffered = io.BytesIO()
+    img.save(buffered, format="JPEG", quality=80)
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    img_data_uri = f"data:image/jpeg;base64,{img_str}"
 
     # 2. Gunakan default jika tidak ditentukan
     arch = (architecture or DEFAULT_ARCH).strip()
@@ -330,6 +364,7 @@ async def predict(
         "is_correct": is_correct,
         "top5": top5,
         "all_probs": all_probs,
+        "image_data_uri": img_data_uri,
     })
 
 

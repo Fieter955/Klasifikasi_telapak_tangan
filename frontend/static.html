@@ -549,7 +549,7 @@
             <input
               type="file"
               id="file-input"
-              accept="image/*"
+              accept="image/*,.heic,.heif"
               class="hidden"
               onchange="handleFileSelect(event)"
             />
@@ -610,7 +610,7 @@
                   >
                 </p>
                 <p class="mt-2 text-xs text-stone-600">
-                  JPG, PNG, BMP, WEBP — ukuran bebas
+                  JPG, PNG, BMP, WEBP, HEIC — ukuran bebas
                 </p>
               </div>
             </div>
@@ -627,6 +627,14 @@
                 class="w-full h-full object-contain"
                 style="padding: 12px"
               />
+              <!-- HEIC Placeholder (browsers can't render HEIC natively) -->
+              <div id="heic-preview-placeholder" class="hidden flex flex-col items-center justify-center h-full gap-3">
+                <div class="w-16 h-16 rounded-xl bg-gold/10 flex items-center justify-center border border-gold/30">
+                  <span class="text-gold font-bold">HEIC</span>
+                </div>
+                <p class="text-sm text-stone-400" id="heic-file-name"></p>
+                <p class="text-xs text-stone-500 italic">(Preview tidak tersedia untuk HEIC)</p>
+              </div>
               <!-- Re-upload hint -->
               <div
                 class="absolute bottom-3 right-3 px-3 py-1.5 rounded-xl text-xs text-stone-400 font-body backdrop-blur"
@@ -1085,25 +1093,63 @@
       // ============================================================
       // FILE PROCESSING
       // ============================================================
-      function processFile(file) {
-        if (!file.type.startsWith("image/")) {
-          showError("File harus berupa gambar (JPG, PNG, BMP, WEBP).");
+      async function processFile(file) {
+        const isHeic = file.name.toLowerCase().endsWith(".heic") || file.name.toLowerCase().endsWith(".heif");
+        
+        if (!file.type.startsWith("image/") && !isHeic) {
+          showError("File harus berupa gambar (JPG, PNG, BMP, WEBP, HEIC).");
           return;
         }
+        
         selectedFile = file;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const src = e.target.result;
-          document.getElementById("preview-img").src = src;
-          document.getElementById("result-img").src = src;
-          document.getElementById("upload-placeholder").classList.add("hidden");
-          document.getElementById("upload-preview").classList.remove("hidden");
-          setButtonReady(true);
-          hideError();
-          // hide old result
-          document.getElementById("result-card").classList.add("hidden");
-        };
-        reader.readAsDataURL(file);
+        const previewImg = document.getElementById("preview-img");
+        const resultImg = document.getElementById("result-img");
+        const heicPlaceholder = document.getElementById("heic-preview-placeholder");
+        const heicFileName = document.getElementById("heic-file-name");
+
+        // UI Reset
+        document.getElementById("upload-placeholder").classList.add("hidden");
+        document.getElementById("upload-preview").classList.remove("hidden");
+        document.getElementById("result-card").classList.add("hidden");
+        hideError();
+
+        if (isHeic) {
+          // Show temporary loading in preview
+          previewImg.classList.add("hidden");
+          heicPlaceholder.classList.remove("hidden");
+          heicFileName.textContent = "Mengonversi HEIC...";
+          setButtonReady(false);
+
+          try {
+            const form = new FormData();
+            form.append("file", file);
+            const r = await fetch(`${API}/api/convert`, { method: "POST", body: form });
+            if (!r.ok) throw new Error("Gagal mengonversi preview");
+            const data = await r.json();
+            
+            previewImg.src = data.image_data_uri;
+            previewImg.classList.remove("hidden");
+            heicPlaceholder.classList.add("hidden");
+            resultImg.src = data.image_data_uri;
+            setButtonReady(true);
+          } catch (e) {
+            heicFileName.textContent = file.name;
+            showError("Gagal memuat preview HEIC, tapi file tetap bisa diklasifikasi.");
+            setButtonReady(true);
+          }
+        } else {
+          // Standard image handling
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const src = e.target.result;
+            previewImg.src = src;
+            previewImg.classList.remove("hidden");
+            heicPlaceholder.classList.add("hidden");
+            resultImg.src = src;
+            setButtonReady(true);
+          };
+          reader.readAsDataURL(file);
+        }
       }
 
       // ============================================================
@@ -1209,6 +1255,11 @@
           return;
         }
         card.classList.remove("hidden");
+
+        // Update result image with the one from backend (handles HEIC preview)
+        if (data.image_data_uri) {
+          document.getElementById("result-img").src = data.image_data_uri;
+        }
 
         // --- Status badge ---
         const badge = document.getElementById("result-status-badge");
