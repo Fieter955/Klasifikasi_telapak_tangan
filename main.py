@@ -7,6 +7,7 @@ Jalankan dengan:
 Lalu buka browser: http://localhost:8011
 """
 
+import time
 import io
 import base64
 from pathlib import Path
@@ -22,7 +23,13 @@ from pillow_heif import register_heif_opener
 from torchvision import models as tmodels
 
 # Registrasi agar Pillow bisa membaca file HEIC/HEIF
+# Catatan: Ini tidak memperlambat JPG karena Pillow hanya memanggil decoder HEIF 
+# jika magic number file sesuai dengan format HEIF/HEIC.
 register_heif_opener()
+
+# Optimasi CUDA jika tersedia
+if torch.cuda.is_available():
+    torch.backends.cudnn.benchmark = True
 
 from model_def import (
     AlexNetCustom,
@@ -89,6 +96,26 @@ _model_cache: dict = {}
 
 
 # ===========================================================
+# HELPER: OPTIMASI PREVIEW
+# ===========================================================
+
+def generate_preview_base64(img: Image.Image, max_size=(400, 400)) -> str:
+    """
+    Membuat preview Base64 yang ringan dengan meresize gambar terlebih dahulu.
+    Ini SANGAT mengurangi waktu pemrosesan untuk gambar resolusi tinggi.
+    """
+    # Gunakan copy agar tidak merusak image asli yang akan di-preprocess
+    preview = img.copy()
+    preview.thumbnail(max_size)
+    
+    buffered = io.BytesIO()
+    # JPEG quality 70 sudah cukup untuk preview dan lebih cepat
+    preview.save(buffered, format="JPEG", quality=70)
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/jpeg;base64,{img_str}"
+
+
+# ===========================================================
 # FUNGSI LOAD MODEL
 # ===========================================================
 
@@ -140,7 +167,7 @@ def load_model(architecture: str, model_file: str) -> nn.Module:
 app = FastAPI(
     title="Klasifikasi Gambar API",
     description="Backend untuk sistem klasifikasi gambar berbasis PyTorch",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 app.add_middleware(
@@ -235,15 +262,16 @@ async def convert_image(
 ):
     """
     Menerima gambar apa pun (termasuk HEIC) dan mengembalikan Base64 JPEG.
-    Digunakan agar frontend bisa menampilkan preview HEIC.
+    Digunakan agar frontend bisa menampilkan preview HEIC secara ringan.
     """
     contents = await file.read()
     try:
+        start_time = time.time()
         img = Image.open(io.BytesIO(contents)).convert("RGB")
-        buffered = io.BytesIO()
-        img.save(buffered, format="JPEG", quality=80)
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        return JSONResponse({"image_data_uri": f"data:image/jpeg;base64,{img_str}"})
+        img_data_uri = generate_preview_base64(img)
+        
+        print(f"[DEBUG] /api/convert: {round(time.time() - start_time, 4)}s")
+        return JSONResponse({"image_data_uri": img_data_uri})
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Gagal mengonversi gambar: {e}")
 
@@ -266,19 +294,20 @@ async def predict(
     """
     Klasifikasi satu gambar menggunakan model yang dipilih.
     """
+    t_start = time.time()
 
     # 1. Baca & validasi gambar
     contents = await file.read()
+    t_read = time.time()
     try:
         img = Image.open(io.BytesIO(contents)).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="File bukan gambar yang valid.")
+    t_open = time.time()
 
-    # 1a. Konversi gambar ke base64 agar frontend bisa menampilkan (terutama untuk HEIC)
-    buffered = io.BytesIO()
-    img.save(buffered, format="JPEG", quality=80)
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    img_data_uri = f"data:image/jpeg;base64,{img_str}"
+    # 1a. Konversi gambar ke base64 secara OPTIMAL (Resize dulu)
+    img_data_uri = generate_preview_base64(img)
+    t_preview = time.time()
 
     # 2. Gunakan default jika tidak ditentukan
     arch = (architecture or DEFAULT_ARCH).strip()
@@ -293,9 +322,12 @@ async def predict(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Gagal memuat model: {exc}")
+    t_load = time.time()
 
-    # 3. Preprocessing & inferensi
+    # 4. Preprocessing & inferensi
     tensor = PREPROCESS(img).unsqueeze(0).to(device)
+    t_preprocess = time.time()
+    
     with torch.no_grad():
         logits = model(tensor)
         # Ensure probs is always a list of floats, handling 1D or 2D logits
@@ -304,13 +336,23 @@ async def predict(
             probs = [probs_tensor.item()]
         else:
             probs = probs_tensor.cpu().tolist()
+    t_inference = time.time()
 
     pred_idx: int = int(probs.index(max(probs)))
     confidence: float = round(probs[pred_idx] * 100, 4)
     
-    print(f"[DEBUG] pred_idx: {pred_idx}, confidence: {confidence}%, probs_len: {len(probs)}")
+    # Logging performa untuk diagnosa user
+    print(f"--- PERFORMANCE LOG ---")
+    print(f"Read File    : {round(t_read - t_start, 4)}s")
+    print(f"Open Image   : {round(t_open - t_read, 4)}s")
+    print(f"Preview Gen  : {round(t_preview - t_open, 4)}s (Optimized)")
+    print(f"Load Model   : {round(t_load - t_preview, 4)}s (Cached)")
+    print(f"Preprocess   : {round(t_preprocess - t_load, 4)}s")
+    print(f"Inference    : {round(t_inference - t_preprocess, 4)}s")
+    print(f"TOTAL        : {round(t_inference - t_start, 4)}s")
+    print(f"-----------------------")
 
-    # 4. Cek kebenaran (opsional)
+    # 5. Cek kebenaran (opsional)
     is_correct = None
     if true_label and true_label.strip():
         tl = true_label.strip()
@@ -324,8 +366,7 @@ async def predict(
             if 0 <= idx < len(LABELS_NUMERIC):
                 is_correct = idx == pred_idx
 
-    # 5. Top-5 & All Probabilities
-    # Handle cases where probs length doesn't match NUM_CLASSES or is very small
+    # 6. Top-5 & All Probabilities
     num_probs = len(probs)
     sorted_idx = sorted(range(num_probs), key=lambda i: probs[i], reverse=True)
     
@@ -365,6 +406,10 @@ async def predict(
         "top5": top5,
         "all_probs": all_probs,
         "image_data_uri": img_data_uri,
+        "performance": {
+            "total_time": round(t_inference - t_start, 4),
+            "inference_time": round(t_inference - t_preprocess, 4)
+        }
     })
 
 
