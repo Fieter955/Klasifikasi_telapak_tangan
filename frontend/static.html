@@ -1093,6 +1093,53 @@
       // ============================================================
       // FILE PROCESSING
       // ============================================================
+      async function resizeImageClientSide(file, maxWidth = 800, maxHeight = 800) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+              const canvas = document.createElement("canvas");
+              let width = img.width;
+              let height = img.height;
+
+              if (width > height) {
+                if (width > maxWidth) {
+                  height *= maxWidth / width;
+                  width = maxWidth;
+                }
+              } else {
+                if (height > maxHeight) {
+                  width *= maxHeight / height;
+                  height = maxHeight;
+                }
+              }
+
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0, width, height);
+
+              canvas.toBlob(
+                (blob) => {
+                  const resizedFile = new File([blob], file.name, {
+                    type: "image/jpeg",
+                    lastModified: Date.now(),
+                  });
+                  resolve(resizedFile);
+                },
+                "image/jpeg",
+                0.8
+              );
+            };
+            img.onerror = (err) => reject(err);
+          };
+          reader.onerror = (err) => reject(err);
+        });
+      }
+
       async function processFile(file) {
         const isHeic = file.name.toLowerCase().endsWith(".heic") || file.name.toLowerCase().endsWith(".heif");
         
@@ -1101,19 +1148,19 @@
           return;
         }
         
-        selectedFile = file;
-        const previewImg = document.getElementById("preview-img");
-        const resultImg = document.getElementById("result-img");
-        const heicPlaceholder = document.getElementById("heic-preview-placeholder");
-        const heicFileName = document.getElementById("heic-file-name");
-
         // UI Reset
         document.getElementById("upload-placeholder").classList.add("hidden");
         document.getElementById("upload-preview").classList.remove("hidden");
         document.getElementById("result-card").classList.add("hidden");
         hideError();
 
+        const previewImg = document.getElementById("preview-img");
+        const resultImg = document.getElementById("result-img");
+        const heicPlaceholder = document.getElementById("heic-preview-placeholder");
+        const heicFileName = document.getElementById("heic-file-name");
+
         if (isHeic) {
+          selectedFile = file; // Tetap gunakan file asli untuk HEIC
           // Show temporary loading in preview
           previewImg.classList.add("hidden");
           heicPlaceholder.classList.remove("hidden");
@@ -1138,17 +1185,39 @@
             setButtonReady(true);
           }
         } else {
-          // Standard image handling
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const src = e.target.result;
-            previewImg.src = src;
-            previewImg.classList.remove("hidden");
-            heicPlaceholder.classList.add("hidden");
-            resultImg.src = src;
-            setButtonReady(true);
-          };
-          reader.readAsDataURL(file);
+          // Standard image handling with client-side resize
+          try {
+            console.log(`Original size: ${Math.round(file.size / 1024)} KB`);
+            const resizedFile = await resizeImageClientSide(file);
+            console.log(`Resized size: ${Math.round(resizedFile.size / 1024)} KB`);
+            
+            selectedFile = resizedFile;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const src = e.target.result;
+              previewImg.src = src;
+              previewImg.classList.remove("hidden");
+              heicPlaceholder.classList.add("hidden");
+              resultImg.src = src;
+              setButtonReady(true);
+            };
+            reader.readAsDataURL(selectedFile);
+          } catch (e) {
+            console.error("Client-side resize failed:", e);
+            // Fallback ke file asli jika resize gagal
+            selectedFile = file;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const src = e.target.result;
+              previewImg.src = src;
+              previewImg.classList.remove("hidden");
+              heicPlaceholder.classList.add("hidden");
+              resultImg.src = src;
+              setButtonReady(true);
+            };
+            reader.readAsDataURL(file);
+          }
         }
       }
 

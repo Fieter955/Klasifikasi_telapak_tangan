@@ -268,6 +268,9 @@ async def convert_image(
     try:
         start_time = time.time()
         img = Image.open(io.BytesIO(contents)).convert("RGB")
+        # Resize awal untuk efisiensi CPU (khusus untuk file besar/HEIC)
+        img.thumbnail((800, 800))
+        
         img_data_uri = generate_preview_base64(img)
         
         print(f"[DEBUG] /api/convert: {round(time.time() - start_time, 4)}s")
@@ -301,6 +304,8 @@ async def predict(
     t_read = time.time()
     try:
         img = Image.open(io.BytesIO(contents)).convert("RGB")
+        # Resize awal untuk efisiensi CPU
+        img.thumbnail((800, 800))
     except Exception:
         raise HTTPException(status_code=400, detail="File bukan gambar yang valid.")
     t_open = time.time()
