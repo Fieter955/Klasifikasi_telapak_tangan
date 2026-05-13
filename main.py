@@ -7,6 +7,7 @@ Jalankan dengan:
 Lalu buka browser: http://localhost:8011
 """
 
+import asyncio
 import time
 import io
 import base64
@@ -21,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pillow_heif import register_heif_opener
 from torchvision import models as tmodels
+from torchvision import transforms
 
 # Registrasi agar Pillow bisa membaca file HEIC/HEIF
 # Catatan: Ini tidak memperlambat JPG karena Pillow hanya memanggil decoder HEIF 
@@ -180,6 +182,20 @@ app.add_middleware(
 
 
 # ----------------------------------------------------------
+# STARTUP WARMUP
+# ----------------------------------------------------------
+
+@app.on_event("startup")
+async def warmup():
+    """Pre-load model default saat server start agar worker siap sebelum request pertama."""
+    try:
+        load_model(DEFAULT_ARCH, DEFAULT_MODEL_FILE)
+        print("[INFO] Model pre-loaded on startup.")
+    except Exception as e:
+        print(f"[WARN] Warmup skipped (model file mungkin belum ada): {e}")
+
+
+# ----------------------------------------------------------
 # HEALTH CHECK
 # ----------------------------------------------------------
 
@@ -334,20 +350,20 @@ async def predict(
     # 4. Preprocessing & inferensi
     if img.size == (224, 224):
         # Langsung to tensor jika ukuran sudah pas (bypass Resize)
-        from torchvision import transforms
         tensor = transforms.ToTensor()(img).unsqueeze(0).to(device)
     else:
         tensor = PREPROCESS(img).unsqueeze(0).to(device)
     t_preprocess = time.time()
-    
-    with torch.no_grad():
-        logits = model(tensor)
-        # Ensure probs is always a list of floats, handling 1D or 2D logits
-        probs_tensor = torch.softmax(logits, dim=1).squeeze()
-        if probs_tensor.dim() == 0:
-            probs = [probs_tensor.item()]
-        else:
-            probs = probs_tensor.cpu().tolist()
+
+    loop = asyncio.get_event_loop()
+    def run_inference():
+        with torch.inference_mode():
+            logits = model(tensor)
+            probs_tensor = torch.softmax(logits, dim=1).squeeze()
+            if probs_tensor.dim() == 0:
+                return [probs_tensor.item()]
+            return probs_tensor.cpu().tolist()
+    probs = await loop.run_in_executor(None, run_inference)
     t_inference = time.time()
 
     pred_idx: int = int(probs.index(max(probs)))
