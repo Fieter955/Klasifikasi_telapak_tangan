@@ -307,7 +307,7 @@ async def predict(
         img = Image.open(io.BytesIO(contents)).convert("RGB")
         # Resize awal untuk efisiensi CPU (abaikan jika sudah 224x224 dari client)
         if img.size != (224, 224):
-            img.thumbnail((800, 800))
+            img = img.resize((224, 224), Image.LANCZOS)
     except Exception:
         raise HTTPException(status_code=400, detail="File bukan gambar yang valid.")
     t_open = time.time()
@@ -461,6 +461,10 @@ if frontend_dir.exists():
 if __name__ == "__main__":
     import uvicorn
     import os
+    # Railway/Cloud biasanya memberikan port melalui environment variable PORT
+    port = int(os.environ.get("PORT", 8011))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+ import os
     # Railway/Cloud biasanya memberikan port melalui environment variable PORT
     port = int(os.environ.get("PORT", 8011))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

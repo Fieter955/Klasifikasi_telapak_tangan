@@ -1173,21 +1173,16 @@
         } else {
           // Standard image handling
           try {
-            // 1. Tampilkan gambar ASLI untuk user (Kualitas Tinggi)
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              const src = e.target.result;
-              previewImg.src = src;
-              previewImg.classList.remove("hidden");
-              heicPlaceholder.classList.add("hidden");
-              resultImg.src = src; // Gambar hasil juga pakai yang asli
-            };
-            reader.readAsDataURL(file);
-
             // 2. Resize di balik layar (224x224) untuk dikirim ke server
             console.log(`Original size: ${Math.round(file.size / 1024)} KB`);
             const resizedFile = await resizeImageClientSide(file);
             console.log(`Resized size for model: ${Math.round(resizedFile.size / 1024)} KB`);
+            
+            const previewUrl = URL.createObjectURL(resizedFile);
+            previewImg.src = previewUrl;
+            previewImg.classList.remove("hidden");
+            heicPlaceholder.classList.add("hidden");
+            resultImg.src = previewUrl;
             
             selectedFile = resizedFile;
             setButtonReady(true);
