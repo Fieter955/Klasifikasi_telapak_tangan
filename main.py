@@ -269,7 +269,8 @@ async def convert_image(
         start_time = time.time()
         img = Image.open(io.BytesIO(contents)).convert("RGB")
         # Resize awal untuk efisiensi CPU (khusus untuk file besar/HEIC)
-        img.thumbnail((800, 800))
+        if img.size != (224, 224):
+            img.thumbnail((800, 800))
         
         img_data_uri = generate_preview_base64(img)
         
@@ -304,14 +305,15 @@ async def predict(
     t_read = time.time()
     try:
         img = Image.open(io.BytesIO(contents)).convert("RGB")
-        # Resize awal untuk efisiensi CPU
-        img.thumbnail((800, 800))
+        # Resize awal untuk efisiensi CPU (abaikan jika sudah 224x224 dari client)
+        if img.size != (224, 224):
+            img.thumbnail((800, 800))
     except Exception:
         raise HTTPException(status_code=400, detail="File bukan gambar yang valid.")
     t_open = time.time()
 
-    # 1a. Konversi gambar ke base64 secara OPTIMAL (Resize dulu)
-    img_data_uri = generate_preview_base64(img)
+    # 1a. Lewati Preview Gen (Frontend sudah punya gambar asli/preview)
+    img_data_uri = None
     t_preview = time.time()
 
     # 2. Gunakan default jika tidak ditentukan
@@ -330,7 +332,12 @@ async def predict(
     t_load = time.time()
 
     # 4. Preprocessing & inferensi
-    tensor = PREPROCESS(img).unsqueeze(0).to(device)
+    if img.size == (224, 224):
+        # Langsung to tensor jika ukuran sudah pas (bypass Resize)
+        from torchvision import transforms
+        tensor = transforms.ToTensor()(img).unsqueeze(0).to(device)
+    else:
+        tensor = PREPROCESS(img).unsqueeze(0).to(device)
     t_preprocess = time.time()
     
     with torch.no_grad():
@@ -350,7 +357,7 @@ async def predict(
     print(f"--- PERFORMANCE LOG ---")
     print(f"Read File    : {round(t_read - t_start, 4)}s")
     print(f"Open Image   : {round(t_open - t_read, 4)}s")
-    print(f"Preview Gen  : {round(t_preview - t_open, 4)}s (Optimized)")
+    print(f"Bypass Prev  : {round(t_preview - t_open, 4)}s")
     print(f"Load Model   : {round(t_load - t_preview, 4)}s (Cached)")
     print(f"Preprocess   : {round(t_preprocess - t_load, 4)}s")
     print(f"Inference    : {round(t_inference - t_preprocess, 4)}s")
@@ -410,7 +417,6 @@ async def predict(
         "is_correct": is_correct,
         "top5": top5,
         "all_probs": all_probs,
-        "image_data_uri": img_data_uri,
         "performance": {
             "total_time": round(t_inference - t_start, 4),
             "inference_time": round(t_inference - t_preprocess, 4)
